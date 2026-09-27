@@ -90,7 +90,12 @@ test('missing hour, bad units, HTTP error, bad JSON and timeout return controlle
   const timeout = new OpenMeteoRiskService(async (_url, { signal }) => new Promise((_resolve, reject) => {
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
   }), now);
-  await assert.rejects(timeout.assess(request), /временно недоступен/);
+  const keepAlive = setTimeout(() => {}, 5_100);
+  try {
+    await assert.rejects(timeout.assess(request), /временно недоступен/);
+  } finally {
+    clearTimeout(keepAlive);
+  }
 });
 
 test('not found has no made-up weather', async () => {

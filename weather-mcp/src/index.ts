@@ -78,18 +78,20 @@ function weatherDescription(code: number): string {
   return descriptions[code] ?? "Неизвестные погодные условия";
 }
 
-async function fetchJson(url: URL, fetchImpl: typeof fetch): Promise<unknown> {
+type Logger = Pick<Console, "error">;
+
+async function fetchJson(url: URL, fetchImpl: typeof fetch, logger: Logger): Promise<unknown> {
   let response: Response;
 
   try {
     response = await fetchImpl(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch (error) {
-    console.error("Open-Meteo request failed:", error);
+    logger.error("Open-Meteo request failed:", error);
     throw new WeatherServiceError(WEATHER_UNAVAILABLE_MESSAGE);
   }
 
   if (!response.ok) {
-    console.error(`Open-Meteo returned HTTP ${response.status} for ${url.hostname}`);
+    logger.error(`Open-Meteo returned HTTP ${response.status} for ${url.hostname}`);
     throw new WeatherServiceError(WEATHER_UNAVAILABLE_MESSAGE);
   }
 
@@ -98,19 +100,19 @@ async function fetchJson(url: URL, fetchImpl: typeof fetch): Promise<unknown> {
     if (isRecord(data) && data.error === true) throw new WeatherServiceError(WEATHER_UNAVAILABLE_MESSAGE);
     return data;
   } catch (error) {
-    console.error("Open-Meteo returned invalid JSON:", error);
+    logger.error("Open-Meteo returned invalid JSON:", error);
     throw new WeatherServiceError(WEATHER_UNAVAILABLE_MESSAGE);
   }
 }
 
-async function getWeather(city: string, days: number, fetchImpl: typeof fetch) {
+async function getWeather(city: string, days: number, fetchImpl: typeof fetch, logger: Logger) {
   const geocodingUrl = new URL(GEOCODING_API);
   geocodingUrl.searchParams.set("name", cleanCity(city));
   geocodingUrl.searchParams.set("count", "1");
   geocodingUrl.searchParams.set("language", "ru");
   geocodingUrl.searchParams.set("format", "json");
 
-  const geocoding = await fetchJson(geocodingUrl, fetchImpl);
+  const geocoding = await fetchJson(geocodingUrl, fetchImpl, logger);
   if (!isRecord(geocoding) || (geocoding.results !== undefined && !Array.isArray(geocoding.results))) {
     throw new WeatherServiceError(WEATHER_UNAVAILABLE_MESSAGE);
   }
@@ -138,7 +140,7 @@ async function getWeather(city: string, days: number, fetchImpl: typeof fetch) {
   forecastUrl.searchParams.set("timezone", "auto");
   forecastUrl.searchParams.set("forecast_days", String(days));
 
-  const forecast = await fetchJson(forecastUrl, fetchImpl);
+  const forecast = await fetchJson(forecastUrl, fetchImpl, logger);
   if (!isRecord(forecast)) throw new WeatherServiceError(WEATHER_UNAVAILABLE_MESSAGE);
   const current = forecast.current;
   const daily = forecast.daily;
@@ -183,10 +185,11 @@ async function getWeather(city: string, days: number, fetchImpl: typeof fetch) {
 
 export function createServer(
   riskService = new OpenMeteoRiskService(),
-  weatherDependencies: { fetchImpl?: typeof fetch; now?: () => Date } = {}
+  weatherDependencies: { fetchImpl?: typeof fetch; now?: () => Date; logger?: Logger } = {}
 ): McpServer {
   const weatherFetch = weatherDependencies.fetchImpl ?? fetch;
   const weatherNow = weatherDependencies.now ?? (() => new Date());
+  const logger = weatherDependencies.logger ?? console;
   const weatherCache = new MemoryCache<NonNullable<Awaited<ReturnType<typeof getWeather>>>>(
     WEATHER_CACHE_TTL_MS,
     () => weatherNow().getTime()
@@ -214,7 +217,7 @@ export function createServer(
       try {
         const cacheKey = JSON.stringify([normalizeCity(city), days]);
         const cached = weatherCache.get(cacheKey);
-        const weather = cached ?? await getWeather(city, days, weatherFetch);
+        const weather = cached ?? await getWeather(city, days, weatherFetch, logger);
 
         if (!weather) {
           return {
@@ -239,7 +242,7 @@ export function createServer(
           error instanceof WeatherServiceError
             ? error.message
             : "Не удалось получить погоду. Попробуйте позже.";
-        console.error("get_weather failed:", error);
+        logger.error("get_weather failed:", error);
 
         return {
           content: [{ type: "text" as const, text: message }],

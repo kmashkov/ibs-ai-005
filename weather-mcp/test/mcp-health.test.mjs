@@ -27,7 +27,10 @@ const riskArguments = { city: 'Dubai', start_at: '2026-09-23T16:00', work_type: 
 const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), { status });
 
 async function withMcpServer(riskService, weatherDependencies, check) {
-  const server = createServer(riskService, weatherDependencies);
+  const server = createServer(riskService, {
+    ...weatherDependencies,
+    logger: { error() {} }
+  });
   const client = new Client({ name: 'weather-cache-test', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   try {
