@@ -1,0 +1,139 @@
+task_id: HW-WEATHER-MASHKOV
+summary: Добавить MCP find_safe_weather_window с exact geocoding нового пути, единым полным forecast и ранжированием через assessRisk.
+architecture_decision: >-
+  Добавить optional capability findSafeWeatherWindow(request) в существующий
+  OpenMeteoRiskService. Request несёт разобранный полный SearchPeriod и candidates.
+  Новый MCP handler проверяет вход и строит candidates до сети.
+  Старый assess/fuzzy resolver/три публичных инструмента остаются без изменений.
+alternatives_considered:
+  - name: Вызывать assess на каждый candidate
+    decision: rejected
+    reason: Создаёт повторные forecast-запросы.
+  - name: Отдельный сервис с собственными погодными парсером и risk thresholds
+    decision: rejected
+    reason: Дублирует существующие проверки и risk logic.
+  - name: Optional метод существующего сервиса; один full forecast и локальная оценка
+    decision: selected
+    reason: Сохраняет старые контракты и повторно использует assessRisk.
+contracts:
+  input:
+    tool: find_safe_weather_window
+    strict: true
+    city: trimmed string length 1..120
+    work_type: [maintenance, installation, inspection]
+    search_start: YYYY-MM-DDTHH:mm MSK UTC+3
+    search_end: YYYY-MM-DDTHH:mm MSK UTC+3
+    duration_hours: integer 1..8
+  exported_time_api:
+    - "parseSearchPeriod(searchStart: string, searchEnd: string, now: Date): SearchPeriod"
+    - "buildCandidatePeriods(period: SearchPeriod, durationHours: number): CandidatePeriod[]"
+  exported_service_api:
+    request: "SafeWindowSearchRequest {city, work_type, search_start, search_end, duration_hours, period: SearchPeriod, candidates}"
+    method: "findSafeWeatherWindow(request: SafeWindowSearchRequest): Promise<SafeWindowSearchResult>"
+    optional_capability: true
+    result: "success | not_found | ambiguous; provider failures throw WeatherDataError"
+  exported_ranking_api: "rankSafeWindows(windows: AssessedCandidate[]): AssessedCandidate[]; compare by period.start.getTime()"
+  internal_ranking_type: "AssessedCandidate {period: CandidatePeriod with Date fields, risk_level, recommendation, factors}; never serialize this type"
+  public_safe_window_json_fields: [start_at, end_at, duration_hours, risk_level, recommendation, factors]
+  success_payload:
+    checked_candidates: number of all generated and ranked candidates
+    city: {name: string, region: optional string, country: string, timezone: string}
+    input_timezone: Europe/Moscow
+    window_timezone: Europe/Moscow
+    factor_timezone: UTC
+    source: Open-Meteo
+    fetched_at: ISO UTC from service clock after successful forecast validation
+    selected: SafeWindow with MSK start_at/end_at, exclusive end, duration_hours, risk_level, recommendation, UTC RiskFactor[]
+    alternatives: up to 3 SafeWindow values in sorted order
+  ranking: [risk rank LOW=0/MEDIUM=1/HIGH=2, factors.length ascending, start epoch ascending]
+time_rules:
+  request_now: handler calls weatherNow() once for parse/build, passes parsed SearchPeriod; service has no requestNow parameter and does not revalidate
+  strict_future: search_start > requestNow, new tool only
+  horizon: search_start < search_end <= requestNow + 120 hours
+  interval: half-open [start, end)
+  candidate_alignment: first epoch hour >= search_start, then 1 hour increments
+  candidate_fit: candidate end <= search_end
+  no_candidates: controlled isError, no structuredContent, no geocoding/fetch
+  all_high: return top-ranked candidate with recommendation CANCEL
+geocoding:
+  new_path_policy: exact normalized city name and every comma qualifier matches admin1 or country
+  zero_exact_matches: not_found, no forecast
+  one_exact_match: continue
+  multiple_exact_matches: ambiguous with up to five options, no forecast
+  legacy_assess: retain existing fuzzy fallback unchanged
+forecast:
+  request_count: exactly one after unique exact geocoding
+  parameters: {timezone: UTC, wind_speed_unit: ms, forecast_days: 6, hourly: "temperature_2m,precipitation_probability,wind_speed_10m"}
+  validation: service validates the passed full request.period [start,end), including UTC hours outside candidate windows
+  timeout_errors_cache: reuse existing timeout and controlled errors; no new cache; preserve old cache/fetched_at behavior
+steps:
+  - id: 1
+    action: После одобрения v2 перейти на отдельную личную ветку/копию, зафиксировать чистое состояние и выполнить baseline npm run ci.
+    components: [weather-mcp/package.json, isolated working copy]
+    dependencies: []
+    risks: [не начинать изменения при проваленном baseline без расследования]
+    validation: [сохранить реальный код возврата и фактические build/test результаты]
+  - id: 2
+    action: Добавить SearchPeriod/CandidatePeriod, parseSearchPeriod и buildCandidatePeriods с отдельной строгой границей; сохранить старый parser.
+    components: [weather-mcp/src/time.ts, weather-mcp/test/risk-time.test.mjs]
+    dependencies: [id 1]
+    risks: [публичные строки минутной точности не кодируют миллисекунды]
+    validation: [start==now отклонён новым API; старый parser регрессия; ровно 120h принимается, следующая минута отвергается; generator boundary tests]
+  - id: 3
+    action: Добавить rankSafeWindows и seeded property tests с независимым oracle и production generator.
+    components: [weather-mcp/src/risk.ts, weather-mcp/test/find-safe-weather-window.test.mjs]
+    dependencies: [id 2]
+    risks: [повторное использование production comparator тестом маскирует дефект]
+    validation: [200+ seeded samples; независимый tuple oracle; permutations; generator containment; конкретные негативные образцы; transient mutation sensitivity check]
+  - id: 4
+    action: Добавить optional сервисную capability с новым exact resolver, одним UTC forecast_days=6 и полной почасовой валидацией search period.
+    components: [weather-mcp/src/open-meteo.ts, weather-mcp/test/open-meteo.test.mjs]
+    dependencies: [id 2, id 3]
+    risks: [неполный крайний час вне candidate; случайный fuzzy fallback нового tool]
+    validation: [typo/exact/qualifier/ambiguous/empty tests; UTC midnight horizon with start 2026-09-29T20:15 MSK/end 2026-09-30T01:30/duration 2 leaves 22:00Z outside candidates; one forecast; clock/fetched_at separation; errors lack partial result]
+  - id: 5
+    action: Зарегистрировать MCP tool, schema, optional capability guard и тесты legacy stub.
+    components: [weather-mcp/src/index.ts, weather-mcp/test/mcp-health.test.mjs, weather-mcp/test/compare-weather-windows.test.mjs]
+    dependencies: [id 4]
+    risks: [legacy service implements only assess; stale tools/list assertions]
+    validation: [legacy new-tool controlled response, no payload/network; all 5 existing tools/list assertions updated; compare tie unchanged]
+  - id: 6
+    action: Обновить README, выполнить npm run ci, затем npm run inspect; сохранить только реальные ручные доказательства и deliverables.
+    components: [weather-mcp/README.md, artifacts/HW-WEATHER-MASHKOV/verification.md, artifacts/HW-WEATHER-MASHKOV/reflection.md, prompts/homework-weather-mcp.md]
+    dependencies: [id 5]
+    risks: [не выдавать ожидания/динамически устаревшие даты за доказательства]
+    validation: [CI PASS перед Inspector; реальный success с динамическим интервалом и отказ duration_hours=0; фактические args/output/time в verification]
+  - id: 7
+    action: После одобрения роли последовательно выполняют Builder, затем Tester, затем Reviewer.
+    components: [approved source diff, test evidence, review evidence]
+    dependencies: [id 6]
+    risks: [review не параллелить с незавершённой реализацией]
+    validation: [Builder change-set; Tester фактическая матрица; Reviewer независимое заключение]
+tests:
+  - Fixed-date parser, minute-representable horizon boundaries, old parser compatibility
+  - Candidate generator rounding and exact/end+1h containment
+  - Risk ordering by independent test oracle; 0/1/3/4+ windows; HIGH/CANCEL
+  - Seeded 200+ generated ranking/permutation cases and production generator containment
+  - New resolver exact/qualifier/ambiguous/not-found/typo; old assess fuzzy behavior unchanged
+  - One forecast URL/request with UTC, ms, forecast_days=6 and complete full-range hourly coverage
+  - Handler requestNow parse/build; separate service clock read after forecast for fetched_at; failures provide no structured result
+  - Legacy assess-only stub: old handlers work, new handler returns exact controlled error, no network
+  - Existing exact tool lists and all post-error availability assertions; compare ties
+  - npm run ci, followed by npm run inspect and dynamic real success/refusal examples
+compatibility_checks:
+  - Старый assess и его fuzzy fallback не менять.
+  - Старый parseWorkPeriod допускает start==now; строгая нижняя граница действует только новому tool.
+  - Старые get_weather, assess_weather_risk, compare_weather_windows, их payload и compare tie сохраняются.
+  - createServer принимает legacy объект только с assess; новый optional method проверяется при вызове нового tool.
+  - Обновить compare test exact list и mcp-health exact list плюс три mcp-health numeric length assertions.
+migration: []
+rollback:
+  - Revert only approved source/test/README changes in the personal branch; there is no data or infrastructure migration.
+required_approvals:
+  - Explicit user approval of implementation-plan-v2.md before source changes.
+  - Approve new-path exact city resolver while preserving legacy fuzzy behavior.
+  - Approve proposed success payload, explicit timezone fields, time boundaries, sorting, no-candidate error and HIGH/CANCEL behavior.
+  - Approve fixed forecast_days=6 UTC request and full-search hourly coverage rule.
+open_questions: []
+status: PLANNED
+approval: approved

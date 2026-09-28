@@ -15,6 +15,23 @@ export interface RiskFactor {
   level: "MEDIUM" | "HIGH";
 }
 
+export interface AssessedCandidate {
+  period: import("./time.js").CandidatePeriod;
+  risk_level: RiskLevel;
+  recommendation: Recommendation;
+  factors: RiskFactor[];
+}
+
+const RISK_RANK: Record<RiskLevel, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 };
+
+export function rankSafeWindows(windows: AssessedCandidate[]): AssessedCandidate[] {
+  return [...windows].sort((left, right) =>
+    RISK_RANK[left.risk_level] - RISK_RANK[right.risk_level] ||
+    left.factors.length - right.factors.length ||
+    left.period.start.getTime() - right.period.start.getTime()
+  );
+}
+
 export function assessRisk(hours: HourlyWeather[]): {
   risk_level: RiskLevel;
   recommendation: Recommendation;

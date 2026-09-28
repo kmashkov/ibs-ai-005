@@ -1,0 +1,78 @@
+{
+  "task_key": "HW-WEATHER-MASHKOV",
+  "captured_at": "2026-09-27T19:28:58.4825130Z",
+  "files": [
+    {
+      "path": "weather-mcp/.dockerignore",
+      "sha256": "F12F85D561216649BF8C33A7EA032785CC2F3EDC0D9316227696A383E98E7670"
+    },
+    {
+      "path": "weather-mcp/.gitignore",
+      "sha256": "05FE7A628802F976B8AE34365446AECDA0A7BC06C61DBD4BBC9B7B4F02A08B75"
+    },
+    {
+      "path": "weather-mcp/Dockerfile",
+      "sha256": "3D2EF706AB24E5CC3CF8C5D25EB6CF449C60E550E428ABCCE0ABF8C1CAB871E0"
+    },
+    {
+      "path": "weather-mcp/package-lock.json",
+      "sha256": "B055B078E9998FE5EC5C4CB17867C73C7FD8248EC4B96D970A976A2BE1F5EF10"
+    },
+    {
+      "path": "weather-mcp/package.json",
+      "sha256": "66648FACA82860210D266597F38AAF92598ADE7E21A3FF730B0CE2182506658C"
+    },
+    {
+      "path": "weather-mcp/README.md",
+      "sha256": "4F081C7BE89D84F0006E1C75AC4AC166FFEBF1FE4F190538994A2DC481A48EDB"
+    },
+    {
+      "path": "weather-mcp/tsconfig.json",
+      "sha256": "807F89DD4CD669FA644C851E8C7718EC7D47E8BCF7BABC096FF7A84B70C38023"
+    },
+    {
+      "path": "weather-mcp/src/cache.ts",
+      "sha256": "3F81FFFEBDA64E0F9212B1F8FD70AA676E94FB7564DAAF6A8E8F32CBFB6943FD"
+    },
+    {
+      "path": "weather-mcp/src/health.ts",
+      "sha256": "ED35D9FFFE82C5B35E0911BE69510ADE037523238F4331FE62D2576DDAB70235"
+    },
+    {
+      "path": "weather-mcp/src/index.ts",
+      "sha256": "52A1DF432901D4C41436A350641D5C4DA53E15BDE9DDD31E8CDA2DC191358511"
+    },
+    {
+      "path": "weather-mcp/src/open-meteo.ts",
+      "sha256": "DF49F58BF8247052EED3A9758BBD9683671BBA3291D6D2E1E40F68596196E94B"
+    },
+    {
+      "path": "weather-mcp/src/risk.ts",
+      "sha256": "34F352CF8DC3BE3785BD130D49E922E5C9BAD27C9B07AD4D9BD69F50FDF6D879"
+    },
+    {
+      "path": "weather-mcp/src/time.ts",
+      "sha256": "AB36F0396239EDB3F17882DBB269FD3A7259FDC97480A3E4416713C7C3E68447"
+    },
+    {
+      "path": "weather-mcp/test/cache.test.mjs",
+      "sha256": "6AC3704BE56C8AC69BC3D108CD856954D41BE70CD08F4CA9544BFD1110902ABE"
+    },
+    {
+      "path": "weather-mcp/test/compare-weather-windows.test.mjs",
+      "sha256": "FDF56CB752D25F293D58D3F0A39F9E582444ACA126CFE1757F2F91E064D970F7"
+    },
+    {
+      "path": "weather-mcp/test/mcp-health.test.mjs",
+      "sha256": "9A7946ED845B3C711C98F622C026FCC591370030220EF0902F1F3D6FCD37B07C"
+    },
+    {
+      "path": "weather-mcp/test/open-meteo.test.mjs",
+      "sha256": "3828C59024BD4B7F1FA130A13499AA92C51B6FA10878CE4F2F1D26C3EA950A7A"
+    },
+    {
+      "path": "weather-mcp/test/risk-time.test.mjs",
+      "sha256": "FCF4CE8B6E297869240D7891EEDEBB053DEF53892F4E59E246EEDCBBC7752332"
+    }
+  ]
+}

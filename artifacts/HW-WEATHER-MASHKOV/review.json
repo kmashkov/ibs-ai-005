@@ -1,0 +1,40 @@
+{
+  "verdict": "approve",
+  "acceptance_criteria": [
+    { "criterion": "tools/list сохраняет три прежних инструмента и добавляет find_safe_weather_window", "status": "verified", "evidence": "Изменены два точных tools/list assertions и три post-error assertions; CI прошёл. Verification также фиксирует фактический tools/list через Inspector." },
+    { "criterion": "Новая входная схема ограничивает duration_hours целыми 1..8 и валидирует enum/город", "status": "verified", "evidence": "weather-mcp/src/index.ts регистрирует strict Zod-схему; тест MCP отклоняет 0, 1.5 и 9 без structuredContent. Реальный stdio MCP-вызов duration_hours=0 записан в verification.md." },
+    { "criterion": "MSK интерпретация, весь интервал строго future и не далее пяти суток; кандидаты целочасовые и полностью внутри", "status": "verified", "evidence": "parseSearchPeriod проверяет start > now, end > start и end <= now+120h; buildCandidatePeriods округляет вверх и проверяет полное вмещение. Фиксированные boundary-тесты и 240 генеративных примеров прошли." },
+    { "criterion": "Неизвестный или неоднозначный город не выбирается автоматически", "status": "verified", "evidence": "Новый путь фильтрует геокодирование по точному нормализованному имени и каждому уточнению; тесты typo/not_found и ambiguous подтверждены CI. Старый fuzzy resolver оставлен в assess." },
+    { "criterion": "Один forecast покрывает весь период, а сетевые/данные ошибки дают controlled failure без частичного результата", "status": "verified", "evidence": "Сервис делает один forecast запрос, валидирует весь SearchPeriod и строит success только после полного разбора; тест исключает последний час вне кандидатов и проверяет отсутствие structuredContent для ошибки. npm run ci прошёл." },
+    { "criterion": "Ранжирование risk/factor count/start и выдача selected плюс максимум трёх alternatives", "status": "verified", "evidence": "rankSafeWindows сортирует эти три ключа; сервис возвращает первый и slice(1,4). Детерминированный независимый oracle и проверки HIGH/CANCEL прошли." },
+    { "criterion": "Стабильный JSON-only structuredContent с checked_candidates, городом, source, fetched_at и часовыми полями", "status": "verified", "evidence": "SafeWindowSearchResult явно задаёт структуру; Date проецируются в строки MSK, факторы остаются ISO UTC. MCP-тест подтверждает отсутствие внутреннего period и success payload; полная CI успешна." },
+    { "criterion": "Старые инструменты и контракты/поведение остаются совместимыми", "status": "verified", "evidence": "Старый assess/resolver не изменён; compare logic не менялась. Legacy fuzzy regression и прежний набор тестов входят в прошедший CI (38/38)." },
+    { "criterion": "README, npm run ci, ручной успешный и отказной MCP-примеры, verification и рефлексия готовы", "status": "verified", "evidence": "README содержит контракт; повторённый reviewer npm run ci завершился с кодом 0, tsc успешен, 38/38 тестов. verification.md документирует сетевой Inspector success и реальный MCP stdio schema refusal. reflection.md содержит семь предложений." },
+    { "criterion": "Генеративные проверки покрывают победителя, containment и устойчивость к перестановке", "status": "verified", "evidence": "find-safe-weather-window.test.mjs фиксированным seed проверяет 240 примеров: независимый сортировочный oracle, containment для production generator, исходный/обратный/перемешанный порядок; дополнительные негативные примеры проверяют риск, факторы, время и exclusive boundary." }
+  ],
+  "findings": [
+    {
+      "severity": "LOW",
+      "title": "Нет проверки мутационной чувствительности сортировки и временной границы",
+      "location": "weather-mcp/test/find-safe-weather-window.test.mjs; artifacts/HW-WEATHER-MASHKOV/verification.md",
+      "evidence": "Тесты содержат точные отрицательные примеры и независимый oracle, но transient mutation comparator/boundary не запускалась; verification.md это явно отмечает.",
+      "reproduction": "Подтверждено чтением файла тестов и verification.md; проверка мутаций не воспроизводилась.",
+      "recommendation": "Можно добавить transient mutation как отдельное усиление, если курс требует доказать, что тестовый набор обнаружит инверсию comparator или смещение границы. Критерии задания уже покрыты фактическими проверками и CI."
+    }
+  ],
+  "checks_reproduced": [
+    "Из weather-mcp повторён npm run ci: exit code 0; TypeScript build успешен; 38 тестов, 38 passed, 0 failed, 0 skipped.",
+    "Независимо прочитаны ЗАДАНИЕ.md, спецификация, план, весь git diff HEAD -- weather-mcp, untracked weather-mcp/test/find-safe-weather-window.test.mjs, README и verification.md.",
+    "Проверены task_key/external_id/task_id = HW-WEATHER-MASHKOV; ветка codex/hw-weather-mashkov; approval в workflow-status.json = true.",
+    "Сверены пять прежних tools/list assertions и legacy compare tie-поведение по изменённому diff и тестам."
+  ],
+  "checks_not_reproduced": [
+    "npm run inspect и внешний Open-Meteo вызов в этой проверке повторно не запускались; их фактические результаты подтверждаются только записями Tester в verification.md.",
+    "Mutation sensitivity не выполнялась."
+  ],
+  "residual_risks": [
+    "Ручной успешный результат Open-Meteo зависит от времени и внешнего сервиса; это подтверждение на момент записи, не повторяемая фикстура. Inspector не принял duration_hours=0 через числовую форму, но контролируемый отказ отдельно воспроизведён настоящим MCP stdio клиентом и не засчитан по одной лишь записи Inspector.",
+    "Геокодирование ограничено count=5 ответами Open-Meteo; неоднозначность оценивается среди возвращённых API вариантов, как указано в verification.md.",
+    "Генеративный тест проверяет нулевые секунды, но явно не нулевые миллисекунды. Production generator формирует старты из ceil(timestamp/HOUR_MS)*HOUR_MS, поэтому создаёт точные целые часы; это не блокирует критерий."
+  ]
+}

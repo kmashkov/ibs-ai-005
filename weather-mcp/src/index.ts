@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url";
 import { startHealthServer } from "./health.js";
 import { cleanCity, MemoryCache, normalizeCity, WEATHER_CACHE_TTL_MS } from "./cache.js";
 import { OpenMeteoRiskService, WeatherDataError, WEATHER_UNAVAILABLE_MESSAGE } from "./open-meteo.js";
-import { InputError, parseWorkPeriod } from "./time.js";
-import type { RiskResult, RiskRequest } from "./open-meteo.js";
+import { InputError, buildCandidatePeriods, parseSearchPeriod, parseWorkPeriod } from "./time.js";
+import type { RiskResult, RiskRequest, RiskServiceWithOptionalSearch } from "./open-meteo.js";
 
 const GEOCODING_API = "https://geocoding-api.open-meteo.com/v1/search";
 const FORECAST_API = "https://api.open-meteo.com/v1/forecast";
@@ -184,7 +184,7 @@ async function getWeather(city: string, days: number, fetchImpl: typeof fetch, l
 }
 
 export function createServer(
-  riskService = new OpenMeteoRiskService(),
+  riskService: RiskServiceWithOptionalSearch = new OpenMeteoRiskService(),
   weatherDependencies: { fetchImpl?: typeof fetch; now?: () => Date; logger?: Logger } = {}
 ): McpServer {
   const weatherFetch = weatherDependencies.fetchImpl ?? fetch;
@@ -282,6 +282,44 @@ export function createServer(
           content: [{ type: "text" as const, text: message }],
           isError: true
         };
+      }
+    }
+  );
+
+  server.registerTool(
+    "find_safe_weather_window",
+    {
+      title: "Find a safe weather window",
+      description: "Searches hourly forecasts for safe full-hour work windows. Search times use Moscow time.",
+      inputSchema: z.object({
+        city: z.string().trim().min(1, "Укажите название города.").max(120),
+        work_type: z.enum(["maintenance", "installation", "inspection"]),
+        search_start: z.string(),
+        search_end: z.string(),
+        duration_hours: z.number().int().min(1).max(8)
+      }).strict()
+    },
+    async (request) => {
+      try {
+        const requestNow = weatherNow();
+        const period = parseSearchPeriod(request.search_start, request.search_end, requestNow);
+        const candidates = buildCandidatePeriods(period, request.duration_hours);
+        if (candidates.length === 0) {
+          return { content: [{ type: "text" as const, text: "В указанном интервале нет допустимых погодных окон." }], isError: true };
+        }
+        if (!riskService.findSafeWeatherWindow) {
+          return { content: [{ type: "text" as const, text: "Поиск погодных окон недоступен в подключённом погодном сервисе." }], isError: true };
+        }
+        const result = await riskService.findSafeWeatherWindow({ ...request, period, candidates });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          ...(result.kind === "success" ? { structuredContent: result } : {}),
+          isError: result.kind !== "success"
+        };
+      } catch (error) {
+        const message = error instanceof WeatherDataError ? WEATHER_UNAVAILABLE_MESSAGE : error instanceof InputError
+          ? error.message : "Не удалось найти погодное окно. Попробуйте позже.";
+        return { content: [{ type: "text" as const, text: message }], isError: true };
       }
     }
   );

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assessRisk } from '../src/risk.ts';
-import { InputError, parseWorkPeriod } from '../src/time.ts';
+import { assessRisk, rankSafeWindows } from '../src/risk.ts';
+import { InputError, buildCandidatePeriods, parseSearchPeriod, parseWorkPeriod } from '../src/time.ts';
 
 const hour = (temperature_c, precipitation_probability_percent, wind_speed_ms) => ({
   time: '2026-09-23T13:00:00.000Z', temperature_c, precipitation_probability_percent, wind_speed_ms
@@ -60,4 +60,36 @@ test('Moscow time converts to UTC and period must fit the forecast horizon', () 
   assert.throws(() => parseWorkPeriod('2026-09-23T15:00', 0, now), InputError);
   assert.throws(() => parseWorkPeriod('2026-09-23T16:00', 1e-20, now), /слишком мала/);
   assert.throws(() => parseWorkPeriod('2026-09-23 15:00', 1, now), InputError);
+});
+
+test('search period is strictly future and candidate windows align to full hours inside its half-open range', () => {
+  const now = new Date('2026-09-23T12:00:00.000Z');
+  const period = parseSearchPeriod('2026-09-23T15:15', '2026-09-23T19:00', now);
+  assert.equal(period.start.toISOString(), '2026-09-23T12:15:00.000Z');
+  const candidates = buildCandidatePeriods(period, 2);
+  assert.deepEqual(candidates.map(({ start, end }) => [start.toISOString(), end.toISOString()]), [
+    ['2026-09-23T13:00:00.000Z', '2026-09-23T15:00:00.000Z'],
+    ['2026-09-23T14:00:00.000Z', '2026-09-23T16:00:00.000Z']
+  ]);
+  assert.throws(() => parseSearchPeriod('2026-09-23T15:00', '2026-09-23T16:00', now), InputError);
+  const tooShort = parseSearchPeriod('2026-09-23T15:01', '2026-09-23T15:59', now);
+  assert.equal(buildCandidatePeriods(tooShort, 1).length, 0);
+  assert.throws(() => parseSearchPeriod('2026-09-23T15:00', '2026-09-23T14:59', now), InputError);
+  assert.throws(() => parseSearchPeriod('2026-09-23T15:00', '2026-09-23T16:00', now), InputError);
+  const horizon = parseSearchPeriod('2026-09-28T14:00', '2026-09-28T15:00', now);
+  assert.equal(horizon.end.getTime(), now.getTime() + 120 * 60 * 60 * 1000);
+  assert.throws(() => parseSearchPeriod('2026-09-28T14:00', '2026-09-28T15:01', now), InputError);
+  assert.equal(parseWorkPeriod('2026-09-23T15:00', 1, now).start.getTime(), now.getTime());
+});
+
+test('safe window ranking compares risk, factor count, then start time', () => {
+  const candidate = (hour, risk, factors) => ({
+    period: { start: new Date(`2026-09-23T${String(hour).padStart(2, '0')}:00:00.000Z`), end: new Date(`2026-09-23T${String(hour + 1).padStart(2, '0')}:00:00.000Z`), duration_hours: 1 },
+    risk_level: risk, recommendation: risk === 'HIGH' ? 'CANCEL' : risk === 'MEDIUM' ? 'REVIEW' : 'PROCEED',
+    factors: Array.from({ length: factors }, () => ({}))
+  });
+  const ranked = rankSafeWindows([candidate(15, 'MEDIUM', 1), candidate(13, 'LOW', 0), candidate(12, 'MEDIUM', 1), candidate(11, 'MEDIUM', 0)]);
+  assert.deepEqual(ranked.map(({ risk_level, period }) => [risk_level, period.start.getUTCHours()]), [
+    ['LOW', 13], ['MEDIUM', 11], ['MEDIUM', 12], ['MEDIUM', 15]
+  ]);
 });
